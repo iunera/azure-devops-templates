@@ -1,0 +1,72 @@
+parameters:
+- name: file_type_to_copy
+  type: string
+  default: helm
+
+- name: docker_arguments
+  type: string
+  default: ""
+
+- name: build_context
+  type: string
+  default: $(Build.SourcesDirectory)/
+
+stages:
+- stage: Build
+  displayName: Build
+  jobs:
+  - job: Build
+    displayName: Build
+    pool:
+      name: Default
+    steps:
+      - task: Docker@2
+        displayName: build
+        inputs:
+          command: 'build'
+          containerRegistry: 'dockerhub_iunera'
+          repository: '$(docker_image_name)'
+          buildContext: ${{ parameters.build_context }}
+          Dockerfile: '$(Build.SourcesDirectory)/$(project_name)/Dockerfile'
+          tags: $(docker_image_tag)
+          arguments: ${{ parameters.docker_arguments }}
+
+      - task: Docker@2
+        displayName: push
+        inputs:
+          command: 'push'
+          containerRegistry: 'dockerhub_iunera'
+          repository: '$(docker_image_name)'
+          buildContext: ${{ parameters.build_context }}
+          Dockerfile: '$(Build.SourcesDirectory)/$(project_name)/Dockerfile'
+          tags: $(docker_image_tag)
+
+      - task: CopyFiles@2
+        displayName: 'Copy Files to: $(build.artifactstagingdirectory)'
+        inputs:
+          SourceFolder: $(build.sourcesdirectory)/$(project_name)
+          Contents: >-
+            **/*-$(target_env).${{ parameters.file_type_to_copy }}.yaml
+          TargetFolder: $(build.artifactstagingdirectory)
+
+      - task: Bash@3
+        displayName: 'Replace docker_image_tag in kubernetes manifest'
+        inputs:
+          targetType: 'inline'
+          script: |
+            sed -i 's/docker_image_tag/$(docker_image_tag)/g' $(build.artifactstagingdirectory)/*.${{ parameters.file_type_to_copy }}.yaml
+      - task: CmdLine@2
+        displayName: 'test if a *.${{ parameters.file_type_to_copy }}.yaml exists'
+        inputs:
+          script: |
+            set -e
+            ls -la $(build.artifactstagingdirectory)/*.${{ parameters.file_type_to_copy }}.yaml
+          failOnStderr: true
+
+      - task: PublishBuildArtifacts@1
+        name: PublishBuildArtifacts_4
+        displayName: 'Publish Artifact: drop'
+        inputs:
+          PathtoPublish: $(build.artifactstagingdirectory)
+          TargetPath: '\\my\share\$(Build.DefinitionName)\$(Build.BuildNumber)'
+
